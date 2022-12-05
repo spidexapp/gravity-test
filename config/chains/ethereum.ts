@@ -1,10 +1,14 @@
 export default {
-	chainId: "15",
-	chainName: "Ethereum",
-	nativeCurrency: {
-		name: "Diode",
-		decimals: 18,
-		symbol: "Diode",
+	name: "Ethereum",
+	config: {
+		chainId: "15",
+		name: "",
+		chainName: "Ethereum",
+		nativeCurrency: {
+			name: "DIODE",
+			decimals: 18,
+			symbol: "DIODE",
+		},
+		rpcUrls: ["http://3.139.102.147:8547"],
 	},
-	rpcUrls: ["http://3.139.102.147:8547"],
 };

@@ -4,40 +4,178 @@ import {
 	Select,
 	Image,
 	Heading,
-	Input,
 	Text,
 	Button,
 	HStack,
-	Stack,
-	Skeleton,
 	Icon,
-	useToast,
-	Link,
-	SlideFade,
+	Input,
 } from "@chakra-ui/react";
+import React from "react";
+import Web3 from "web3";
 import Head from "next/head";
 import styles from "../styles/Home.module.css";
 import { IoMdArrowForward } from "react-icons/io";
 import { CgArrowsExchangeV } from "react-icons/cg";
 import { useEffect, useState, useCallback } from "react";
+import { ethToSpx, spxToEth } from "../utils/converter";
+import { getMetamaskBalance, metaMaskSwitch } from "../utils/common";
+import { DecimalUtil } from "../utils/decimal";
+import GRAVITY_ABI from "../abi/gravity";
+import ERC20_ABI from "../abi/erc20";
 
-import axios from "axios";
-import React from "react";
-import eth from "./../config/chains/ethereum";
+import { ethereum, spidex, gravity, osmosis } from "./../config/chains";
 
 export default function Home() {
-	const toast = useToast();
-
-	const [fromChain, setFromChain] = useState<any>(eth);
-	const [address, setAddress] = useState<string>();
-	const [loaing, setLoading] = useState<boolean>(false);
-	const [isLoaded, setIsLoaded] = useState<boolean>(false);
-
-	const transfer = () => {};
+	const [web3, setWeb3] = useState<any>();
+	const [fromChain, setFromChain] = useState<any>(ethereum);
+	const [toChain, setToChain] = useState<any>(spidex);
+	const [fromAddress, setFromAddress] = useState<string>();
+	const [toAddress, setToAddress] = useState<string>();
+	const [fromBalance, setFromBalance] = useState<string>();
 
 	useEffect(() => {
-		transfer();
-	}, [transfer]);
+		const { ethereum }: any = window;
+		const web3pro = new Web3(
+			new Web3.providers.HttpProvider(fromChain.config.rpcUrls[0])
+		);
+		ethereum.enable();
+		console.log("address:", ethereum.selectedAddress);
+
+		setFromAddress(ethereum.selectedAddress);
+		setWeb3(web3pro as any);
+	}, [fromChain]);
+
+	useEffect(() => {
+		if (fromAddress) {
+			getBalance();
+		}
+	}, [fromAddress]);
+
+	const swap = () => {
+		const tmpChain = toChain;
+		setToChain(fromChain);
+		setFromChain(tmpChain);
+	};
+
+	const transfer = async () => {
+		const BN = web3.utils.BN;
+		const gravityBridge = "0x7580bFE88Dd3d07947908FAE12d95872a260F2D8";
+		const destination = "0x37F028927e8b0Ed6D6B4e3632936C07BEDBAb73d";
+		const amount = new BN(String(5 * 1e18)).toString();
+
+		await approve(gravityBridge, amount);
+		await sendToCosmos(gravityBridge, destination, amount);
+	};
+
+	const approve = async (gravityBridge, amount) => {
+		const { ethereum }: any = window;
+		const erc20 = "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609";
+		const erc20Contract = new web3.eth.Contract(ERC20_ABI as any, erc20);
+
+		const approve = erc20Contract.methods
+			.approve(gravityBridge, amount)
+			.encodeABI();
+
+		const approveTransactionParameters = {
+			to: erc20,
+			from: fromAddress,
+			value: "0x0",
+			gasPrice: web3.utils.toHex(7 * 1e9),
+			gasLimit: web3.utils.toHex(300000),
+			data: approve,
+		};
+
+		const approveTxHash = await ethereum.request({
+			method: "eth_sendTransaction",
+			params: [approveTransactionParameters],
+		});
+
+		const allowance = await erc20Contract.methods
+			.allowance(fromAddress, gravityBridge)
+			.call();
+		console.log("approveTxHash:", approveTxHash, "allowance:", allowance);
+	};
+
+	const sendToCosmos = async (gravityBridge, destination, amount) => {
+		const { ethereum }: any = window;
+		const erc20 = "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609";
+		const gravityContract = new web3.eth.Contract(
+			GRAVITY_ABI as any,
+			gravityBridge
+		);
+
+		console.log(ethToSpx(destination), spxToEth(ethToSpx(destination)));
+
+		const sendCosmos = gravityContract.methods
+			.sendToCosmos(erc20, ethToSpx(destination), amount)
+			.encodeABI();
+
+		const sendTransactionParameters = {
+			to: gravityBridge,
+			from: fromAddress,
+			value: "0x00",
+			data: sendCosmos,
+		};
+
+		const txHash = await ethereum.request({
+			method: "eth_sendTransaction",
+			params: [sendTransactionParameters],
+		});
+
+		console.log(txHash);
+	};
+
+	const getBalance = async () => {
+		const result = await getMetamaskBalance(fromAddress);
+		console.log(result);
+		let balance = await web3.eth.getBalance(fromAddress);
+		setFromBalance(
+			DecimalUtil.beautify(
+				DecimalUtil.fromString(
+					balance,
+					fromChain.config.nativeCurrency.decimals
+				)
+			)
+		);
+	};
+
+	const approveToSpidex = async () => {
+		const { ethereum }: any = window;
+		const BN = web3.utils.BN;
+		const erc20 = "0x4bdD769577d3bb38fa1148480B68f0Dea1683D8F";
+		const erc20Contract = new web3.eth.Contract(ERC20_ABI as any, erc20);
+		const toAddress = "0xB6747CFE9cB3d23Fd15CE56576C3C693200cdf81";
+		const amount = new BN(5 * 1e6).toString();
+		const approve = erc20Contract.methods
+			.approve(toAddress, amount)
+			.encodeABI();
+
+		// 请用接受者身份来执行
+		const transferFrom = erc20Contract.methods
+			.transferFrom(fromAddress, toAddress, amount)
+			.encodeABI();
+
+		const approveTransactionParameters = {
+			to: erc20,
+			from: fromAddress,
+			value: "0x0",
+			gasPrice: web3.utils.toHex(7 * 1e9),
+			gasLimit: web3.utils.toHex(300000),
+			data: transferFrom,
+		};
+
+		const approveTxHash = await ethereum.request({
+			method: "eth_sendTransaction",
+			params: [approveTransactionParameters],
+		});
+
+		const result = await erc20Contract.methods.allowance(
+			fromAddress,
+			toAddress
+		);
+
+		console.log(approveTxHash, result);
+	};
 
 	return (
 		<Box className={styles.container}>
@@ -61,13 +199,16 @@ export default function Home() {
 					</Flex>
 
 					<Flex flexDir="column" w="500px">
+						<Text mt={10} ml={2} fontWeight="semibold" fontSize="sm">
+							balance: {fromBalance}
+						</Text>
 						<Box
 							bg="spxGray.200"
 							h="70px"
 							borderRadius="lg"
 							cursor="pointer"
 							p={4}
-							mt={10}
+							mt={2}
 							pb={6}
 						>
 							<Flex
@@ -85,33 +226,34 @@ export default function Home() {
 										fontWeight="semibold"
 										p={2}
 										ml={4}
-										value={fromChain.chainName}
+										value={fromChain.name}
 										fontSize="sm"
-										onChange={(e) => setAddress(e.target.value)}
+										onChange={(e) => setFromChain(e.target.value)}
 									>
-										<option value="option1">Ethereum</option>
-										<option value="option2">Osmosis</option>
+										<option value="Ethereum">Ethereum</option>
+										<option value="Spidex">Spidex</option>
 									</Select>
 								</HStack>
 
-								<Button>Connect</Button>
+								<Button>{fromAddress ? "Disconnect" : "Connect"}</Button>
 							</Flex>
 						</Box>
-						<Flex justifyContent="center">
-						<Box
-							bg="spxGray.300"
-							borderRadius={20}
-							w="40px"
-							h="40px"
-							mt={6}
-							justifyContent="center"
-							display="flex"
-							alignItems="center"
-						>
-							<Icon as={CgArrowsExchangeV} boxSize={8} />
-						</Box>
+						<Flex justifyContent="center" cursor="pointer">
+							<Box
+								bg="spxGray.300"
+								borderRadius={20}
+								w="40px"
+								h="40px"
+								mt={6}
+								justifyContent="center"
+								display="flex"
+								alignItems="center"
+								onClick={swap}
+							>
+								<Icon as={CgArrowsExchangeV} boxSize={8} />
+							</Box>
 						</Flex>
-			
+
 						<Box
 							bg="spxGray.200"
 							h="70px"
@@ -130,23 +272,23 @@ export default function Home() {
 							>
 								<HStack>
 									<Text fontSize="md">TO</Text>
-									<Select
-										borderRadius={3}
+									<Text fontSize="md" pl={6}>
+										{toChain.name}
+									</Text>
+									<Input
+										borderRadius={0}
 										size="xs"
 										variant="unstyled"
-										fontWeight="semibold"
 										p={2}
+										pl={2}
+										mt={6}
 										ml={4}
-										value={fromChain.chainName}
 										fontSize="sm"
-										onChange={(e) => setAddress(e.target.value)}
-									>
-										<option value="option1">Ethereum</option>
-										<option value="option2">Osmosis</option>
-									</Select>
+										placeholder="Enter Target Address"
+										value={toAddress}
+										onChange={(e) => setToAddress(e.target.value)}
+									/>
 								</HStack>
-
-								<Button>Connect</Button>
 							</Flex>
 						</Box>
 
@@ -155,9 +297,8 @@ export default function Home() {
 								variant="whitePrimary"
 								rounded="md"
 								boxShadow="lg"
-								disabled={!address}
+								disabled={!fromAddress}
 								onClick={transfer}
-								isLoading={loaing}
 								loadingText="Getting"
 							>
 								<HStack>
@@ -165,6 +306,21 @@ export default function Home() {
 									<Icon as={IoMdArrowForward} boxSize={5} />
 								</HStack>
 							</Button>
+
+							{/* <Button
+								variant="whitePrimary"
+								rounded="md"
+								boxShadow="lg"
+								ml={5}
+								disabled={!fromAddress}
+								onClick={toSpidex}
+								loadingText="Getting"
+							>
+								<HStack>
+									<Text>Transfer Spidex</Text>
+									<Icon as={IoMdArrowForward} boxSize={5} />
+								</HStack>
+							</Button> */}
 						</Box>
 					</Flex>
 				</Flex>

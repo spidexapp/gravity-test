@@ -2,7 +2,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Web3 from "web3";
 import requestIp from "request-ip";
-import abi from "../../abi/erc20.json";
+import abi from "../../abi/erc20";
 
 const dotenv = require("dotenv");
 dotenv.config("./../.env");

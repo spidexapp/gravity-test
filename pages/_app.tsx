@@ -3,6 +3,7 @@ import type { AppProps } from "next/app";
 
 import customTheme from "../styles/theme";
 import "../styles/globals.css";
+import React from "react";
 
 export default function App({ Component, pageProps }: AppProps) {
 	return (
