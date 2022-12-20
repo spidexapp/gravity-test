@@ -17,32 +17,22 @@ import styles from "../styles/Home.module.css";
 import { IoMdArrowForward } from "react-icons/io";
 import { CgArrowsExchangeV } from "react-icons/cg";
 import { useEffect, useState, useCallback } from "react";
-import { ethToSpx, spxToEth } from "../utils/converter";
-import { getMetamaskBalance, metaMaskSwitch } from "../utils/common";
-import { DecimalUtil } from "../utils/decimal";
-import GRAVITY_ABI from "../abi/gravity";
-import ERC20_ABI from "../abi/erc20";
+import { ethToSpx, spxToEth } from "../../utils/converter";
+import { getMetamaskBalance, metaMaskSwitch } from "../../utils/common";
+import { DecimalUtil } from "../../utils/decimal";
+import GRAVITY_ABI from "../../abi/gravity";
+import ERC20_ABI from "../../abi/erc20";
 import {
 	assertIsDeliverTxSuccess,
 	SigningStargateClient,
 } from "@cosmjs/stargate";
-import { coin, coins } from "@cosmjs/proto-signing";
 
-import { ethereum, osmosis, axelar } from "../config/chains";
-
-import {
-	AxelarAssetTransfer,
-	Environment,
-	AxelarQueryAPI,
-	CHAINS,
-} from "@axelar-network/axelarjs-sdk";
+import { ethereum, spidex, gravity, osmosis } from "../../config/chains";
 
 export default function Home() {
 	const [web3, setWeb3] = useState<any>();
-	const [loading, setLoading] = useState<boolean>(false);
-	const [fromChain, setFromChain] = useState<any>(axelar);
+	const [fromChain, setFromChain] = useState<any>(spidex);
 	const [toChain, setToChain] = useState<any>(ethereum);
-	const [depositAddress, setDepositAddess] = useState<string>();
 	const [fromAddress, setFromAddress] = useState<string>();
 	const [toAddress, setToAddress] = useState<string>();
 	const [fromBalance, setFromBalance] = useState<string>();
@@ -52,112 +42,55 @@ export default function Home() {
 	useEffect(() => {
 		const { ethereum }: any = window;
 
-		const web3pro = new Web3(ethereum);
+		console.log("ethereum:", ethereum)
+		const web3pro = new Web3(
+			new Web3.providers.HttpProvider(fromChain.config.rpcUrls[0])
+		);
 
-		if (fromChain.name === "Ethereum") {
+		if (fromChain.name === "Spidex") {
+			connectKeplr()
+		} else {
 			ethereum.enable();
 			setFromAddress(ethereum.selectedAddress);
-		} else {
-			connectKeplr();
 		}
 
 		setWeb3(web3pro as any);
 	}, [fromChain]);
 
+	useEffect(() => {
+		if (fromAddress) {
+			getBalance();
+		}
+	}, [fromAddress]);
+
+	const swap = () => {
+		const tmpChain = toChain;
+		setToChain(fromChain);
+		setFromChain(tmpChain);
+	};
+
 	const transfer = async () => {
-		setLoading(true);
-		if (fromChain.name === "Ethereum") {
-			await evmToCosmos();
-		} else {
-			await cosmosToEvm();
-		}
-
-		setLoading(false);
-	};
-
-	const cosmosToEvm = async () => {
-		const convertAmount = 1.2 * 1e6;
+		const BN = web3.utils.BN;
+		const gravityBridge = "0x7580bFE88Dd3d07947908FAE12d95872a260F2D8";
+		const erc20 = "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609";
 		const destination = toAddress
 			? toAddress
-			: "0x1eb6169BD471ef45A1805f34A135eBd38EdF98eC";
+			: "0x37F028927e8b0Ed6D6B4e3632936C07BEDBAb73d";
+		const amount = new BN(String(100 * 1e18)).toString();
 
-		const sdk = new AxelarAssetTransfer({
-			environment: Environment.TESTNET,
-		});
-
-		const depositAddress = await sdk.getDepositAddress(
-			CHAINS.TESTNET.AXELAR, // source chain
-			CHAINS.TESTNET.ETHEREUM, // destination chain
-			destination, // destination address
-			"uausdc" // denom of asset. See note (2) below
-		);
-
-		console.log("depositAddress", depositAddress);
-		const amount = {
-			denom: "uausdc",
-			amount: convertAmount.toString(),
-		};
-		const fee = {
-			amount: [
-				{
-					denom: fromChain.cosmosConfig.stakeCurrency.coinMinimalDenom,
-					amount: fromChain.cosmosConfig.gasPriceStep.average,
-				},
-			],
-			gas: "200000",
-		};
-
-		try {
-			const result = await client.sendTokens(
-				fromAddress,
-				depositAddress,
-				[amount],
-				fee,
-				""
-			);
-			assertIsDeliverTxSuccess(result);
-			alert("交易成功! " + result?.transactionHash);
-			console.log(result);
-		} catch (error: any) {
-			alert("失败! " + error.toString());
-			console.error(error);
-		}
+		await approve(erc20, gravityBridge, amount);
+		await sendToCosmos(erc20, gravityBridge, destination, amount);
 	};
 
-	const evmToCosmos = async () => {
+	const convert = async () => {};
+
+	const approve = async (erc20, gravityBridge, amount) => {
 		const { ethereum }: any = window;
-		const erc20 = "0x254d06f33bDc5b8ee05b2ea472107E300226659A";
-		const destination = toAddress
-			? toAddress
-			: "osmo1x5f9fcw5jdv9epg48j38rp9w67rdrrpz4c6sff";
-		const amount = 1.2 * 1e6;
-		const sdk = new AxelarAssetTransfer({
-			environment: Environment.TESTNET,
-		});
-
-		const depositAddress = await sdk.getDepositAddress(
-			CHAINS.TESTNET.ETHEREUM, // source chain
-			CHAINS.TESTNET.AXELAR, // destination chain
-			destination, // destination address
-			"uausdc" // denom of asset. See note (2) below
-		);
-
-		const axelarQuery = new AxelarQueryAPI({
-			environment: Environment.TESTNET,
-		});
-
-		const fee: any = await axelarQuery.getTransferFee(
-			CHAINS.TESTNET.ETHEREUM,
-			CHAINS.TESTNET.AXELAR,
-			"uausdc",
-			amount
-		);
-
-		const feeDenom = fee.fee.amount / 1e6 + "ausdc";
-
-		console.log("depositAddress", depositAddress, feeDenom);
-
 		const erc20Contract = new web3.eth.Contract(ERC20_ABI as any, erc20);
+
+		const approve = erc20Contract.methods
+			.approve(gravityBridge, amount)
+			.encodeABI();
 
 		const approveTransactionParameters = {
 			to: erc20,
@@ -165,7 +98,7 @@ export default function Home() {
 			value: "0x0",
 			gasPrice: web3.utils.toHex(7 * 1e9),
 			gasLimit: web3.utils.toHex(300000),
-			data: erc20Contract.methods.transfer(depositAddress, amount).encodeABI(),
+			data: approve,
 		};
 
 		const approveTxHash = await ethereum.request({
@@ -173,19 +106,38 @@ export default function Home() {
 			params: [approveTransactionParameters],
 		});
 
-		console.log("approveTxHash:", approveTxHash);
+		const allowance = await erc20Contract.methods
+			.allowance(fromAddress, gravityBridge)
+			.call();
+		console.log("approveTxHash:", approveTxHash, "allowance:", allowance);
 	};
 
-	// useEffect(() => {
-	// 	if (fromAddress) {
-	// 		getBalance();
-	// 	}
-	// }, [fromAddress]);
+	const sendToCosmos = async (erc20, gravityBridge, destination, amount) => {
+		const { ethereum }: any = window;
+		const gravityContract = new web3.eth.Contract(
+			GRAVITY_ABI as any,
+			gravityBridge
+		);
 
-	const swap = () => {
-		const tmpChain = toChain;
-		setToChain(fromChain);
-		setFromChain(tmpChain);
+		console.log(ethToSpx(destination), spxToEth(ethToSpx(destination)));
+
+		const sendCosmos = gravityContract.methods
+			.sendToCosmos(erc20, ethToSpx(destination), amount)
+			.encodeABI();
+
+		const sendTransactionParameters = {
+			to: gravityBridge,
+			from: fromAddress,
+			value: "0x00",
+			data: sendCosmos,
+		};
+
+		const txHash = await ethereum.request({
+			method: "eth_sendTransaction",
+			params: [sendTransactionParameters],
+		});
+
+		console.log(txHash);
 	};
 
 	const getBalance = async () => {
@@ -210,9 +162,7 @@ export default function Home() {
 		await window.keplr.experimentalSuggestChain(fromChain.cosmosConfig);
 		await window.keplr.enable(fromChain.cosmosConfig.chainId);
 
-		const offlineSigner = window.getOfflineSigner?.(
-			fromChain.cosmosConfig.chainId
-		);
+		const offlineSigner = window.getOfflineSigner?.(fromChain.cosmosConfig.chainId);
 		const accounts = await offlineSigner?.getAccounts();
 		const client = await SigningStargateClient.connectWithSigner(
 			fromChain.cosmosConfig.rpc,
@@ -223,10 +173,48 @@ export default function Home() {
 		setClient(client);
 	};
 
+	const approveToSpidex = async () => {
+		const { ethereum }: any = window;
+		const BN = web3.utils.BN;
+		const erc20 = "0x4bdD769577d3bb38fa1148480B68f0Dea1683D8F";
+		const erc20Contract = new web3.eth.Contract(ERC20_ABI as any, erc20);
+		const toAddress = "0xB6747CFE9cB3d23Fd15CE56576C3C693200cdf81";
+		const amount = new BN(5 * 1e6).toString();
+		const approve = erc20Contract.methods
+			.approve(toAddress, amount)
+			.encodeABI();
+
+		// 请用接受者身份来执行
+		const transferFrom = erc20Contract.methods
+			.transferFrom(fromAddress, toAddress, amount)
+			.encodeABI();
+
+		const approveTransactionParameters = {
+			to: erc20,
+			from: fromAddress,
+			value: "0x0",
+			gasPrice: web3.utils.toHex(7 * 1e9),
+			gasLimit: web3.utils.toHex(300000),
+			data: transferFrom,
+		};
+
+		const approveTxHash = await ethereum.request({
+			method: "eth_sendTransaction",
+			params: [approveTransactionParameters],
+		});
+
+		const result = await erc20Contract.methods.allowance(
+			fromAddress,
+			toAddress
+		);
+
+		console.log(approveTxHash, result);
+	};
+
 	return (
 		<Box className={styles.container}>
 			<Head>
-				<title>axelar Test</title>
+				<title>Gravity Test</title>
 				<meta name="description" content="Spidex testnet faucet" />
 				<meta
 					name="viewport"
@@ -240,7 +228,7 @@ export default function Home() {
 					<Flex alignItems="center" mt={4} pt={2}>
 						<Image src="/images/spidex.png" h={9} alt="" />
 						<Heading as="h2" size="xl" ml={5} whiteSpace="nowrap">
-							Axelar Test
+							Gravity Test
 						</Heading>
 					</Flex>
 
@@ -272,13 +260,12 @@ export default function Home() {
 										fontWeight="semibold"
 										p={2}
 										ml={4}
-										value={fromChain?.name}
+										value={fromChain.name}
 										fontSize="sm"
 										onChange={(e) => setFromChain(e.target.value)}
 									>
 										<option value="Ethereum">Ethereum</option>
-										<option value="Evmos">Evmos</option>
-										<option value="Axelar">Axelar</option>
+										<option value="Spidex">Spidex</option>
 									</Select>
 								</HStack>
 
@@ -320,7 +307,7 @@ export default function Home() {
 								<HStack w="full">
 									<Text fontSize="md">TO</Text>
 									<Text fontSize="md" pl={6}>
-										{toChain?.name}
+										{toChain.name}
 									</Text>
 									<Input
 										borderRadius={0}
@@ -345,8 +332,7 @@ export default function Home() {
 								variant="whitePrimary"
 								rounded="md"
 								boxShadow="lg"
-								// disabled={!fromAddress}
-								isLoading={loading}
+								disabled={!fromAddress}
 								onClick={transfer}
 								loadingText="Getting"
 							>

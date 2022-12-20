@@ -1,14 +1,14 @@
 export default {
 	name: "Ethereum",
 	config: {
-		chainId: "15",
+		chainId: "5",
 		name: "",
-		chainName: "Ethereum",
+		chainName: "ethereum-2",
 		nativeCurrency: {
-			name: "DIODE",
+			name: "GoerliETH",
 			decimals: 18,
-			symbol: "DIODE",
+			symbol: "GoerliETH",
 		},
-		rpcUrls: ["http://3.139.102.147:8547"],
+		rpcUrls: ["https://goerli.infura.io/v3"],
 	},
 };
